@@ -60,6 +60,11 @@ export function useScheduleStore() {
     setMembersKey((k) => k + 1);
   }, []);
 
+  const updateMember = useCallback(async (id: string, name: string, color: string) => {
+    await membersRepository.update(id, name, color);
+    setMembersKey((k) => k + 1);
+  }, []);
+
   return {
     currentDate,
     weekRange,
@@ -73,5 +78,6 @@ export function useScheduleStore() {
     addEvent,
     addMember,
     removeMember,
+    updateMember,
   };
 }

@@ -42,6 +42,22 @@ export const membersRepository = {
     return data as Member;
   },
 
+  async update(id: string, name: string, color: string): Promise<Member | null> {
+    const { data, error } = await supabase
+      .from("members")
+      .update({ name, color })
+      .eq("id", id)
+      .select("id, name, color")
+      .single();
+
+    if (error) {
+      console.error("Failed to update member:", error.message);
+      return null;
+    }
+
+    return data as Member;
+  },
+
   async remove(id: string): Promise<boolean> {
     const { error } = await supabase
       .from("members")

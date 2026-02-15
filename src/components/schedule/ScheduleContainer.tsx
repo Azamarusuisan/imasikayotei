@@ -3,18 +3,21 @@
 import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Plus, Loader2, UserPlus, X } from "lucide-react";
+import { Plus, Loader2, UserPlus } from "lucide-react";
 import { useScheduleStore } from "@/lib/useScheduleStore";
+import { Member } from "@/lib/types";
 import { WeekNavigation } from "./WeekNavigation";
 import { CalendarGrid } from "./CalendarGrid";
 import { AvailabilityGrid } from "./AvailabilityGrid";
 import { AddEventModal } from "./AddEventModal";
 import { AddMemberModal } from "./AddMemberModal";
+import { EditMemberModal } from "./EditMemberModal";
 
 export function ScheduleContainer() {
   const store = useScheduleStore();
   const [eventModalOpen, setEventModalOpen] = useState(false);
   const [memberModalOpen, setMemberModalOpen] = useState(false);
+  const [editingMember, setEditingMember] = useState<Member | null>(null);
 
   return (
     <div className="min-h-screen bg-background">
@@ -39,24 +42,19 @@ export function ScheduleContainer() {
           </div>
         </div>
 
-        {/* Members Strip */}
+        {/* Members Strip — click to edit */}
         {store.members.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 mb-4">
             {store.members.map((m) => (
-              <span
+              <button
                 key={m.id}
-                className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-secondary text-secondary-foreground group"
+                className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors cursor-pointer"
+                onClick={() => setEditingMember(m)}
+                title="クリックして編集"
               >
                 <span className="w-2 h-2 rounded-full" style={{ backgroundColor: m.color }} />
                 {m.name}
-                <button
-                  className="opacity-0 group-hover:opacity-100 transition-opacity ml-0.5 hover:text-red-500"
-                  onClick={() => store.removeMember(m.id)}
-                  title="削除"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
+              </button>
             ))}
           </div>
         )}
@@ -77,7 +75,6 @@ export function ScheduleContainer() {
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          /* Tabs */
           <Tabs defaultValue="calendar" className="w-full">
             <TabsList className="mb-4">
               <TabsTrigger value="calendar">共通カレンダー</TabsTrigger>
@@ -118,7 +115,13 @@ export function ScheduleContainer() {
         onOpenChange={setMemberModalOpen}
         onSave={store.addMember}
       />
+      <EditMemberModal
+        open={!!editingMember}
+        onOpenChange={(open) => { if (!open) setEditingMember(null); }}
+        member={editingMember}
+        onSave={store.updateMember}
+        onDelete={store.removeMember}
+      />
     </div>
   );
 }
-
