@@ -92,7 +92,7 @@ export function AvailabilityGrid({
       if (!selectedMemberId || selectedMemberId !== memberId || saving) return;
       isDragging.current = true;
       dragCells.current = new Set();
-      const key = `${dayKey(day)}-${slotIdx}`;
+      const key = `${dayKey(day)}|${slotIdx}`;
       dragCells.current.add(key);
       setDraggedCells(new Set(dragCells.current));
     },
@@ -102,7 +102,7 @@ export function AvailabilityGrid({
   const handleMouseEnter = useCallback(
     (memberId: string, day: Date, slotIdx: number) => {
       if (!isDragging.current || selectedMemberId !== memberId) return;
-      const key = `${dayKey(day)}-${slotIdx}`;
+      const key = `${dayKey(day)}|${slotIdx}`;
       dragCells.current.add(key);
       setDraggedCells(new Set(dragCells.current));
     },
@@ -115,9 +115,10 @@ export function AvailabilityGrid({
 
     const slots: { startISO: string; endISO: string; status: PaintStatus }[] = [];
     dragCells.current.forEach((key) => {
-      const [dateStr, slotIdxStr] = key.split("-");
-      const slotIdx = parseInt(slotIdxStr);
-      const day = new Date(dateStr);
+      const sepIdx = key.lastIndexOf("|");
+      const dateStr = key.substring(0, sepIdx);
+      const slotIdx = parseInt(key.substring(sepIdx + 1));
+      const day = new Date(dateStr + "T00:00:00");
       const { startISO, endISO } = getSlotTimes(day, slotIdx);
       slots.push({ startISO, endISO, status: paintStatus });
     });
@@ -168,8 +169,8 @@ export function AvailabilityGrid({
             <button
               key={m.id}
               className={`inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full transition-all ${selectedMemberId === m.id
-                  ? "bg-blue-100 text-blue-800 ring-2 ring-blue-300 font-semibold"
-                  : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                ? "bg-blue-100 text-blue-800 ring-2 ring-blue-300 font-semibold"
+                : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
                 }`}
               onClick={() =>
                 setSelectedMemberId((prev) => (prev === m.id ? null : m.id))
@@ -295,15 +296,15 @@ export function AvailabilityGrid({
                             slotIdx,
                             availability
                           );
-                          const cellKey = `${dk}-${slotIdx}`;
+                          const cellKey = `${dk}|${slotIdx}`;
                           const isBeingPainted = draggedCells.has(cellKey) && isEditable;
 
                           return (
                             <div
                               key={slotIdx}
                               className={`border-l border-b transition-colors ${isBeingPainted
-                                  ? statusStyles[paintStatus].bg + " opacity-70 ring-1 ring-inset ring-blue-400"
-                                  : statusStyles[status].bg
+                                ? statusStyles[paintStatus].bg + " opacity-70 ring-1 ring-inset ring-blue-400"
+                                : statusStyles[status].bg
                                 } ${isEditable ? "cursor-crosshair" : ""}`}
                               style={{ height: `${SLOT_HEIGHT}px` }}
                               title={`${member.name} ${START_HOUR + Math.floor(slotIdx / 2)}:${(slotIdx % 2) * 30 === 0 ? "00" : "30"
