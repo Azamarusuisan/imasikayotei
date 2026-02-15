@@ -52,4 +52,64 @@ export const availabilityRepository = {
 
     return (data as AvailabilityRow[]).map(toSlot);
   },
+
+  async upsertSlot(
+    memberId: string,
+    startISO: string,
+    endISO: string,
+    status: "available" | "busy" | "off"
+  ): Promise<AvailabilitySlot | null> {
+    // First, check if a slot already exists for this member and time range
+    const { data: existing } = await supabase
+      .from("availability_slots")
+      .select("id")
+      .eq("member_id", memberId)
+      .eq("start_iso", startISO)
+      .eq("end_iso", endISO)
+      .maybeSingle();
+
+    if (existing) {
+      // Update existing slot
+      const { data, error } = await supabase
+        .from("availability_slots")
+        .update({ status })
+        .eq("id", existing.id)
+        .select("id, member_id, start_iso, end_iso, status")
+        .single();
+
+      if (error) {
+        console.error("Failed to update availability:", error.message);
+        return null;
+      }
+      return toSlot(data as AvailabilityRow);
+    } else {
+      // Insert new slot
+      const { data, error } = await supabase
+        .from("availability_slots")
+        .insert({ member_id: memberId, start_iso: startISO, end_iso: endISO, status })
+        .select("id, member_id, start_iso, end_iso, status")
+        .single();
+
+      if (error) {
+        console.error("Failed to create availability:", error.message);
+        return null;
+      }
+      return toSlot(data as AvailabilityRow);
+    }
+  },
+
+  async deleteSlot(memberId: string, startISO: string, endISO: string): Promise<boolean> {
+    const { error } = await supabase
+      .from("availability_slots")
+      .delete()
+      .eq("member_id", memberId)
+      .eq("start_iso", startISO)
+      .eq("end_iso", endISO);
+
+    if (error) {
+      console.error("Failed to delete availability:", error.message);
+      return false;
+    }
+    return true;
+  },
 };

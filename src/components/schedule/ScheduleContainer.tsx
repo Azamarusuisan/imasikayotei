@@ -94,6 +94,7 @@ export function ScheduleContainer() {
                 currentDate={store.currentDate}
                 members={store.members}
                 availability={store.availability}
+                onSlotChange={store.setAvailabilitySlot}
               />
             </TabsContent>
           </Tabs>

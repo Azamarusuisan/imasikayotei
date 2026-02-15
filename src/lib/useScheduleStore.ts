@@ -65,6 +65,20 @@ export function useScheduleStore() {
     setMembersKey((k) => k + 1);
   }, []);
 
+  const setAvailabilitySlot = useCallback(async (
+    memberId: string,
+    startISO: string,
+    endISO: string,
+    status: "available" | "busy" | "off" | "none"
+  ) => {
+    if (status === "none") {
+      await availabilityRepository.deleteSlot(memberId, startISO, endISO);
+    } else {
+      await availabilityRepository.upsertSlot(memberId, startISO, endISO, status);
+    }
+    setRefreshKey((k) => k + 1);
+  }, []);
+
   return {
     currentDate,
     weekRange,
@@ -79,5 +93,6 @@ export function useScheduleStore() {
     addMember,
     removeMember,
     updateMember,
+    setAvailabilitySlot,
   };
 }
