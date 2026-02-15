@@ -112,4 +112,35 @@ export const availabilityRepository = {
     }
     return true;
   },
+
+  async bulkUpsert(
+    memberId: string,
+    slots: { startISO: string; endISO: string; status: "available" | "busy" | "off" }[]
+  ): Promise<boolean> {
+    // Delete existing slots for this member in the given time ranges
+    for (const slot of slots) {
+      await supabase
+        .from("availability_slots")
+        .delete()
+        .eq("member_id", memberId)
+        .eq("start_iso", slot.startISO)
+        .eq("end_iso", slot.endISO);
+    }
+
+    // Insert all new slots
+    const rows = slots.map((s) => ({
+      member_id: memberId,
+      start_iso: s.startISO,
+      end_iso: s.endISO,
+      status: s.status,
+    }));
+
+    const { error } = await supabase.from("availability_slots").insert(rows);
+
+    if (error) {
+      console.error("Failed to bulk upsert availability:", error.message);
+      return false;
+    }
+    return true;
+  },
 };

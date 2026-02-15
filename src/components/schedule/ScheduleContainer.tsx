@@ -95,6 +95,7 @@ export function ScheduleContainer() {
                 members={store.members}
                 availability={store.availability}
                 onSlotChange={store.setAvailabilitySlot}
+                onBulkChange={store.bulkSetAvailability}
               />
             </TabsContent>
           </Tabs>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useRef } from "react";
 import { Member, AvailabilitySlot } from "@/lib/types";
 import { getWeekDays, DAY_LABELS, formatDate, overlap } from "@/lib/utils/date";
 
@@ -14,6 +14,10 @@ type Props = {
     endISO: string,
     status: "available" | "busy" | "off" | "none"
   ) => void;
+  onBulkChange?: (
+    memberId: string,
+    slots: { startISO: string; endISO: string; status: "available" | "busy" | "off" }[]
+  ) => void;
 };
 
 const START_HOUR = 9;
@@ -23,8 +27,7 @@ const SLOTS_PER_HOUR = 2;
 const TOTAL_SLOTS = (END_HOUR - START_HOUR) * SLOTS_PER_HOUR;
 
 type SlotStatus = "available" | "busy" | "off" | "none";
-
-const STATUS_CYCLE: SlotStatus[] = ["available", "busy", "off", "none"];
+type PaintStatus = "available" | "busy" | "off";
 
 function getSlotStatus(
   memberId: string,
@@ -43,7 +46,7 @@ function getSlotStatus(
       overlap(a.startISO, a.endISO, slotStart.toISOString(), slotEnd.toISOString())
   );
 
-  return matching?.status as SlotStatus || "none";
+  return (matching?.status as SlotStatus) || "none";
 }
 
 function getSlotTimes(day: Date, slotIndex: number) {
@@ -54,36 +57,95 @@ function getSlotTimes(day: Date, slotIndex: number) {
   return { startISO: slotStart.toISOString(), endISO: slotEnd.toISOString() };
 }
 
-const statusStyles: Record<SlotStatus, { bg: string; label: string; emoji: string }> = {
-  available: { bg: "bg-emerald-400/70 hover:bg-emerald-400", label: "空き", emoji: "🟢" },
-  busy: { bg: "bg-red-400/60 hover:bg-red-400/80", label: "予定あり", emoji: "🔴" },
-  off: { bg: "bg-gray-300/60 hover:bg-gray-300/80", label: "休み", emoji: "⚫" },
-  none: { bg: "bg-gray-50 hover:bg-gray-100", label: "未設定", emoji: "⬜" },
+const statusStyles: Record<SlotStatus, { bg: string; label: string }> = {
+  available: { bg: "bg-emerald-400/70", label: "空き" },
+  busy: { bg: "bg-red-400/60", label: "予定あり" },
+  off: { bg: "bg-gray-300/60", label: "休み" },
+  none: { bg: "bg-gray-50", label: "未設定" },
 };
 
-export function AvailabilityGrid({ currentDate, members, availability, onSlotChange }: Props) {
+const paintOptions: { status: PaintStatus; label: string; color: string; activeColor: string }[] = [
+  { status: "available", label: "空き", color: "bg-emerald-100 text-emerald-700 border-emerald-300", activeColor: "bg-emerald-500 text-white border-emerald-600 ring-2 ring-emerald-300" },
+  { status: "busy", label: "予定あり", color: "bg-red-100 text-red-700 border-red-300", activeColor: "bg-red-500 text-white border-red-600 ring-2 ring-red-300" },
+  { status: "off", label: "休み", color: "bg-gray-200 text-gray-700 border-gray-400", activeColor: "bg-gray-600 text-white border-gray-700 ring-2 ring-gray-400" },
+];
+
+export function AvailabilityGrid({
+  currentDate,
+  members,
+  availability,
+  onSlotChange,
+  onBulkChange,
+}: Props) {
   const weekDays = useMemo(() => getWeekDays(currentDate), [currentDate]);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
+  const [paintStatus, setPaintStatus] = useState<PaintStatus>("available");
   const [saving, setSaving] = useState(false);
 
-  const handleCellClick = useCallback(
-    async (memberId: string, day: Date, slotIndex: number) => {
-      if (!onSlotChange || saving) return;
+  // Drag state
+  const isDragging = useRef(false);
+  const dragCells = useRef<Set<string>>(new Set());
+  const [draggedCells, setDraggedCells] = useState<Set<string>>(new Set());
 
-      // Only allow editing selected member's row
-      if (selectedMemberId && selectedMemberId !== memberId) return;
+  const handleMouseDown = useCallback(
+    (memberId: string, day: Date, slotIdx: number) => {
+      if (!selectedMemberId || selectedMemberId !== memberId || saving) return;
+      isDragging.current = true;
+      dragCells.current = new Set();
+      const key = `${dayKey(day)}-${slotIdx}`;
+      dragCells.current.add(key);
+      setDraggedCells(new Set(dragCells.current));
+    },
+    [selectedMemberId, saving]
+  );
 
-      const currentStatus = getSlotStatus(memberId, day, slotIndex, availability);
-      const nextIdx = (STATUS_CYCLE.indexOf(currentStatus) + 1) % STATUS_CYCLE.length;
-      const nextStatus = STATUS_CYCLE[nextIdx];
+  const handleMouseEnter = useCallback(
+    (memberId: string, day: Date, slotIdx: number) => {
+      if (!isDragging.current || selectedMemberId !== memberId) return;
+      const key = `${dayKey(day)}-${slotIdx}`;
+      dragCells.current.add(key);
+      setDraggedCells(new Set(dragCells.current));
+    },
+    [selectedMemberId]
+  );
 
-      const { startISO, endISO } = getSlotTimes(day, slotIndex);
+  const handleMouseUp = useCallback(async () => {
+    if (!isDragging.current || !selectedMemberId || !onBulkChange) return;
+    isDragging.current = false;
 
+    const slots: { startISO: string; endISO: string; status: PaintStatus }[] = [];
+    dragCells.current.forEach((key) => {
+      const [dateStr, slotIdxStr] = key.split("-");
+      const slotIdx = parseInt(slotIdxStr);
+      const day = new Date(dateStr);
+      const { startISO, endISO } = getSlotTimes(day, slotIdx);
+      slots.push({ startISO, endISO, status: paintStatus });
+    });
+
+    if (slots.length > 0) {
       setSaving(true);
-      await onSlotChange(memberId, startISO, endISO, nextStatus);
+      await onBulkChange(selectedMemberId, slots);
+      setSaving(false);
+    }
+
+    dragCells.current = new Set();
+    setDraggedCells(new Set());
+  }, [selectedMemberId, onBulkChange, paintStatus]);
+
+  // Quick fill entire day
+  const handleFillDay = useCallback(
+    async (day: Date) => {
+      if (!selectedMemberId || !onBulkChange || saving) return;
+      const slots: { startISO: string; endISO: string; status: PaintStatus }[] = [];
+      for (let i = 0; i < TOTAL_SLOTS; i++) {
+        const { startISO, endISO } = getSlotTimes(day, i);
+        slots.push({ startISO, endISO, status: paintStatus });
+      }
+      setSaving(true);
+      await onBulkChange(selectedMemberId, slots);
       setSaving(false);
     },
-    [onSlotChange, selectedMemberId, availability, saving]
+    [selectedMemberId, onBulkChange, paintStatus, saving]
   );
 
   if (members.length === 0) {
@@ -96,9 +158,9 @@ export function AvailabilityGrid({ currentDate, members, availability, onSlotCha
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
       {/* Controls */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="space-y-3">
         {/* Member Selector */}
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-muted-foreground font-medium">編集するメンバー:</span>
@@ -119,41 +181,75 @@ export function AvailabilityGrid({ currentDate, members, availability, onSlotCha
           ))}
         </div>
 
-        {/* Legend */}
-        <div className="flex items-center gap-3">
-          {(["available", "busy", "off"] as SlotStatus[]).map((s) => (
-            <div key={s} className="flex items-center gap-1">
-              <div className={`w-4 h-3 rounded-sm ${statusStyles[s].bg.split(" ")[0]}`} />
-              <span className="text-xs text-muted-foreground">{statusStyles[s].label}</span>
-            </div>
-          ))}
-        </div>
+        {/* Paint Status Selector */}
+        {selectedMemberId && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-muted-foreground font-medium">塗るステータス:</span>
+            {paintOptions.map((opt) => (
+              <button
+                key={opt.status}
+                className={`text-xs px-3 py-1.5 rounded-full border transition-all ${paintStatus === opt.status ? opt.activeColor : opt.color
+                  }`}
+                onClick={() => setPaintStatus(opt.status)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {selectedMemberId && (
+          <p className="text-xs text-blue-600 bg-blue-50 px-3 py-1.5 rounded select-none">
+            💡 セルをクリック＆ドラッグで一括塗り。各日の「一括」ボタンで1日分を一気に設定。
+          </p>
+        )}
       </div>
 
-      {selectedMemberId && (
-        <p className="text-xs text-blue-600 bg-blue-50 px-3 py-1.5 rounded">
-          💡 セルをクリックすると状態が「空き → 予定あり → 休み → 未設定」と切り替わります
-        </p>
-      )}
+      {/* Legend */}
+      <div className="flex items-center gap-3">
+        {(["available", "busy", "off"] as SlotStatus[]).map((s) => (
+          <div key={s} className="flex items-center gap-1">
+            <div className={`w-4 h-3 rounded-sm ${statusStyles[s].bg}`} />
+            <span className="text-xs text-muted-foreground">{statusStyles[s].label}</span>
+          </div>
+        ))}
+        {saving && (
+          <span className="text-xs text-blue-500 ml-2 animate-pulse">保存中...</span>
+        )}
+      </div>
 
       {/* Grid */}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto select-none">
         <div className="min-w-[900px]">
           {weekDays.map((day, dayIdx) => {
             const isToday = formatDate(day) === formatDate(new Date());
+            const dk = dayKey(day);
             return (
               <div key={dayIdx} className="mb-3">
                 <div
-                  className={`text-xs font-medium px-2 py-1 rounded-t ${isToday ? "bg-blue-50 text-blue-700" : "bg-muted text-muted-foreground"
+                  className={`flex items-center justify-between text-xs font-medium px-2 py-1 rounded-t ${isToday ? "bg-blue-50 text-blue-700" : "bg-muted text-muted-foreground"
                     }`}
                 >
-                  {DAY_LABELS[dayIdx]} {day.getMonth() + 1}/{day.getDate()}
+                  <span>
+                    {DAY_LABELS[dayIdx]} {day.getMonth() + 1}/{day.getDate()}
+                  </span>
+                  {selectedMemberId && (
+                    <button
+                      className="text-[10px] px-2 py-0.5 rounded bg-white border hover:bg-gray-50 text-gray-600"
+                      onClick={() => handleFillDay(day)}
+                      disabled={saving}
+                    >
+                      一括 {statusStyles[paintStatus].label}
+                    </button>
+                  )}
                 </div>
                 <div className="border rounded-b overflow-hidden">
                   {/* Time header */}
                   <div
                     className="grid"
-                    style={{ gridTemplateColumns: `100px repeat(${TOTAL_SLOTS}, 1fr)` }}
+                    style={{
+                      gridTemplateColumns: `100px repeat(${TOTAL_SLOTS}, 1fr)`,
+                    }}
                   >
                     <div className="p-1 text-xs text-muted-foreground border-b bg-muted/30">
                       メンバー
@@ -199,19 +295,24 @@ export function AvailabilityGrid({ currentDate, members, availability, onSlotCha
                             slotIdx,
                             availability
                           );
+                          const cellKey = `${dk}-${slotIdx}`;
+                          const isBeingPainted = draggedCells.has(cellKey) && isEditable;
+
                           return (
                             <div
                               key={slotIdx}
-                              className={`border-l border-b transition-colors ${statusStyles[status].bg
-                                } ${isEditable
-                                  ? "cursor-pointer"
-                                  : ""
-                                }`}
+                              className={`border-l border-b transition-colors ${isBeingPainted
+                                  ? statusStyles[paintStatus].bg + " opacity-70 ring-1 ring-inset ring-blue-400"
+                                  : statusStyles[status].bg
+                                } ${isEditable ? "cursor-crosshair" : ""}`}
                               style={{ height: `${SLOT_HEIGHT}px` }}
                               title={`${member.name} ${START_HOUR + Math.floor(slotIdx / 2)}:${(slotIdx % 2) * 30 === 0 ? "00" : "30"
                                 } - ${statusStyles[status].label}`}
-                              onClick={() =>
-                                isEditable && handleCellClick(member.id, day, slotIdx)
+                              onMouseDown={() =>
+                                isEditable && handleMouseDown(member.id, day, slotIdx)
+                              }
+                              onMouseEnter={() =>
+                                isEditable && handleMouseEnter(member.id, day, slotIdx)
                               }
                             />
                           );
@@ -227,4 +328,9 @@ export function AvailabilityGrid({ currentDate, members, availability, onSlotCha
       </div>
     </div>
   );
+}
+
+/** Format day for use as a unique key */
+function dayKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }

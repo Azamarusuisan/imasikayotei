@@ -79,6 +79,15 @@ export function useScheduleStore() {
     setRefreshKey((k) => k + 1);
   }, []);
 
+  const bulkSetAvailability = useCallback(async (
+    memberId: string,
+    slots: { startISO: string; endISO: string; status: "available" | "busy" | "off" }[]
+  ) => {
+    if (slots.length === 0) return;
+    await availabilityRepository.bulkUpsert(memberId, slots);
+    setRefreshKey((k) => k + 1);
+  }, []);
+
   return {
     currentDate,
     weekRange,
@@ -94,5 +103,6 @@ export function useScheduleStore() {
     removeMember,
     updateMember,
     setAvailabilitySlot,
+    bulkSetAvailability,
   };
 }
