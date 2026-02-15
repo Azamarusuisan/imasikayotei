@@ -53,14 +53,14 @@ export function formatTime(date: Date | string): string {
 /** 曜日ラベル */
 export const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-/** 時間スロット (9:00〜20:00, 30分刻み) */
+/** 時間スロット (9:00〜22:00, 30分刻み) */
 export function getTimeSlots(): string[] {
   const slots: string[] = [];
-  for (let h = 9; h < 20; h++) {
+  for (let h = 9; h < 22; h++) {
     slots.push(`${String(h).padStart(2, "0")}:00`);
     slots.push(`${String(h).padStart(2, "0")}:30`);
   }
-  slots.push("20:00");
+  slots.push("22:00");
   return slots;
 }
 
@@ -76,4 +76,9 @@ export function nextWeek(date: Date): Date {
   const d = new Date(date);
   d.setDate(d.getDate() + 7);
   return d;
+}
+
+/** 年月を「2023年 10月」形式に */
+export function formatYearMonth(date: Date): string {
+  return `${date.getFullYear()}年 ${date.getMonth() + 1}月`;
 }
