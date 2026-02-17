@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback, useRef } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { Member, AvailabilitySlot } from "@/lib/types";
 import { getWeekDays, DAY_LABELS, formatDate, overlap } from "@/lib/utils/date";
 
@@ -70,11 +70,15 @@ const paintOptions: { status: PaintStatus; label: string; color: string; activeC
   { status: "off", label: "休み", color: "bg-gray-200 text-gray-700 border-gray-400", activeColor: "bg-gray-600 text-white border-gray-700 ring-2 ring-gray-400" },
 ];
 
+/** Format day for use as a unique key */
+function dayKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 export function AvailabilityGrid({
   currentDate,
   members,
   availability,
-  onSlotChange,
   onBulkChange,
 }: Props) {
   const weekDays = useMemo(() => getWeekDays(currentDate), [currentDate]);
@@ -82,39 +86,62 @@ export function AvailabilityGrid({
   const [paintStatus, setPaintStatus] = useState<PaintStatus>("available");
   const [saving, setSaving] = useState(false);
 
-  // Drag state
-  const isDragging = useRef(false);
-  const dragCells = useRef<Set<string>>(new Set());
-  const [draggedCells, setDraggedCells] = useState<Set<string>>(new Set());
+  // Selected cells for batch save
+  const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
 
-  const handleMouseDown = useCallback(
+  const toggleCell = useCallback(
     (memberId: string, day: Date, slotIdx: number) => {
       if (!selectedMemberId || selectedMemberId !== memberId || saving) return;
-      isDragging.current = true;
-      dragCells.current = new Set();
       const key = `${dayKey(day)}|${slotIdx}`;
-      dragCells.current.add(key);
-      setDraggedCells(new Set(dragCells.current));
+      setSelectedCells((prev) => {
+        const next = new Set(prev);
+        if (next.has(key)) {
+          next.delete(key);
+        } else {
+          next.add(key);
+        }
+        return next;
+      });
     },
     [selectedMemberId, saving]
   );
 
-  const handleMouseEnter = useCallback(
-    (memberId: string, day: Date, slotIdx: number) => {
-      if (!isDragging.current || selectedMemberId !== memberId) return;
-      const key = `${dayKey(day)}|${slotIdx}`;
-      dragCells.current.add(key);
-      setDraggedCells(new Set(dragCells.current));
+  // Select entire day
+  const selectDay = useCallback(
+    (day: Date) => {
+      if (!selectedMemberId || saving) return;
+      const dk = dayKey(day);
+      setSelectedCells((prev) => {
+        const next = new Set(prev);
+        // Check if all slots for this day are already selected
+        let allSelected = true;
+        for (let i = 0; i < TOTAL_SLOTS; i++) {
+          if (!next.has(`${dk}|${i}`)) {
+            allSelected = false;
+            break;
+          }
+        }
+        // Toggle: if all selected, deselect all; otherwise select all
+        for (let i = 0; i < TOTAL_SLOTS; i++) {
+          const key = `${dk}|${i}`;
+          if (allSelected) {
+            next.delete(key);
+          } else {
+            next.add(key);
+          }
+        }
+        return next;
+      });
     },
-    [selectedMemberId]
+    [selectedMemberId, saving]
   );
 
-  const handleMouseUp = useCallback(async () => {
-    if (!isDragging.current || !selectedMemberId || !onBulkChange) return;
-    isDragging.current = false;
+  // Batch save selected cells
+  const handleSave = useCallback(async () => {
+    if (!selectedMemberId || !onBulkChange || selectedCells.size === 0 || saving) return;
 
     const slots: { startISO: string; endISO: string; status: PaintStatus }[] = [];
-    dragCells.current.forEach((key) => {
+    selectedCells.forEach((key) => {
       const sepIdx = key.lastIndexOf("|");
       const dateStr = key.substring(0, sepIdx);
       const slotIdx = parseInt(key.substring(sepIdx + 1));
@@ -123,31 +150,25 @@ export function AvailabilityGrid({
       slots.push({ startISO, endISO, status: paintStatus });
     });
 
-    if (slots.length > 0) {
-      setSaving(true);
-      await onBulkChange(selectedMemberId, slots);
-      setSaving(false);
-    }
+    setSaving(true);
+    await onBulkChange(selectedMemberId, slots);
+    setSaving(false);
+    setSelectedCells(new Set());
+  }, [selectedMemberId, onBulkChange, selectedCells, paintStatus, saving]);
 
-    dragCells.current = new Set();
-    setDraggedCells(new Set());
-  }, [selectedMemberId, onBulkChange, paintStatus]);
+  // Clear selection
+  const handleClear = useCallback(() => {
+    setSelectedCells(new Set());
+  }, []);
 
-  // Quick fill entire day
-  const handleFillDay = useCallback(
-    async (day: Date) => {
-      if (!selectedMemberId || !onBulkChange || saving) return;
-      const slots: { startISO: string; endISO: string; status: PaintStatus }[] = [];
-      for (let i = 0; i < TOTAL_SLOTS; i++) {
-        const { startISO, endISO } = getSlotTimes(day, i);
-        slots.push({ startISO, endISO, status: paintStatus });
-      }
-      setSaving(true);
-      await onBulkChange(selectedMemberId, slots);
-      setSaving(false);
-    },
-    [selectedMemberId, onBulkChange, paintStatus, saving]
-  );
+  // When switching member, clear selection
+  const handleSelectMember = useCallback((memberId: string) => {
+    setSelectedMemberId((prev) => {
+      const next = prev === memberId ? null : memberId;
+      if (next !== prev) setSelectedCells(new Set());
+      return next;
+    });
+  }, []);
 
   if (members.length === 0) {
     return (
@@ -159,7 +180,7 @@ export function AvailabilityGrid({
   }
 
   return (
-    <div className="space-y-4" onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
+    <div className="space-y-4">
       {/* Controls */}
       <div className="space-y-3">
         {/* Member Selector */}
@@ -169,12 +190,10 @@ export function AvailabilityGrid({
             <button
               key={m.id}
               className={`inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full transition-all ${selectedMemberId === m.id
-                ? "bg-blue-100 text-blue-800 ring-2 ring-blue-300 font-semibold"
-                : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                  ? "bg-blue-100 text-blue-800 ring-2 ring-blue-300 font-semibold"
+                  : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
                 }`}
-              onClick={() =>
-                setSelectedMemberId((prev) => (prev === m.id ? null : m.id))
-              }
+              onClick={() => handleSelectMember(m.id)}
             >
               <span className="w-2 h-2 rounded-full" style={{ backgroundColor: m.color }} />
               {m.name}
@@ -185,7 +204,7 @@ export function AvailabilityGrid({
         {/* Paint Status Selector */}
         {selectedMemberId && (
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-muted-foreground font-medium">塗るステータス:</span>
+            <span className="text-xs text-muted-foreground font-medium">設定するステータス:</span>
             {paintOptions.map((opt) => (
               <button
                 key={opt.status}
@@ -201,23 +220,43 @@ export function AvailabilityGrid({
 
         {selectedMemberId && (
           <p className="text-xs text-blue-600 bg-blue-50 px-3 py-1.5 rounded select-none">
-            💡 セルをクリック＆ドラッグで一括塗り。各日の「一括」ボタンで1日分を一気に設定。
+            💡 セルをタップして選択 → 「保存」ボタンで一括保存。「1日選択」で日ごとにまとめて選択。
           </p>
         )}
       </div>
 
       {/* Legend */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         {(["available", "busy", "off"] as SlotStatus[]).map((s) => (
           <div key={s} className="flex items-center gap-1">
             <div className={`w-4 h-3 rounded-sm ${statusStyles[s].bg}`} />
             <span className="text-xs text-muted-foreground">{statusStyles[s].label}</span>
           </div>
         ))}
-        {saving && (
-          <span className="text-xs text-blue-500 ml-2 animate-pulse">保存中...</span>
-        )}
       </div>
+
+      {/* Save / Clear Bar */}
+      {selectedMemberId && selectedCells.size > 0 && (
+        <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg sticky top-0 z-20">
+          <span className="text-sm font-medium text-blue-800 flex-1">
+            {selectedCells.size}個のスロットを選択中
+          </span>
+          <button
+            className="text-xs px-3 py-1.5 rounded bg-white border border-gray-300 text-gray-600 hover:bg-gray-50"
+            onClick={handleClear}
+            disabled={saving}
+          >
+            クリア
+          </button>
+          <button
+            className="text-xs px-4 py-1.5 rounded bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50"
+            onClick={handleSave}
+            disabled={saving}
+          >
+            {saving ? "保存中..." : `「${statusStyles[paintStatus].label}」で保存`}
+          </button>
+        </div>
+      )}
 
       {/* Grid */}
       <div className="overflow-x-auto select-none">
@@ -237,10 +276,10 @@ export function AvailabilityGrid({
                   {selectedMemberId && (
                     <button
                       className="text-[10px] px-2 py-0.5 rounded bg-white border hover:bg-gray-50 text-gray-600"
-                      onClick={() => handleFillDay(day)}
+                      onClick={() => selectDay(day)}
                       disabled={saving}
                     >
-                      一括 {statusStyles[paintStatus].label}
+                      1日選択
                     </button>
                   )}
                 </div>
@@ -297,23 +336,20 @@ export function AvailabilityGrid({
                             availability
                           );
                           const cellKey = `${dk}|${slotIdx}`;
-                          const isBeingPainted = draggedCells.has(cellKey) && isEditable;
+                          const isSelected = selectedCells.has(cellKey) && isEditable;
 
                           return (
                             <div
                               key={slotIdx}
-                              className={`border-l border-b transition-colors ${isBeingPainted
-                                ? statusStyles[paintStatus].bg + " opacity-70 ring-1 ring-inset ring-blue-400"
-                                : statusStyles[status].bg
-                                } ${isEditable ? "cursor-crosshair" : ""}`}
+                              className={`border-l border-b transition-colors ${isSelected
+                                  ? statusStyles[paintStatus].bg + " ring-2 ring-inset ring-blue-500"
+                                  : statusStyles[status].bg
+                                } ${isEditable ? "cursor-pointer active:opacity-70" : ""}`}
                               style={{ height: `${SLOT_HEIGHT}px` }}
                               title={`${member.name} ${START_HOUR + Math.floor(slotIdx / 2)}:${(slotIdx % 2) * 30 === 0 ? "00" : "30"
                                 } - ${statusStyles[status].label}`}
-                              onMouseDown={() =>
-                                isEditable && handleMouseDown(member.id, day, slotIdx)
-                              }
-                              onMouseEnter={() =>
-                                isEditable && handleMouseEnter(member.id, day, slotIdx)
+                              onClick={() =>
+                                isEditable && toggleCell(member.id, day, slotIdx)
                               }
                             />
                           );
@@ -329,9 +365,4 @@ export function AvailabilityGrid({
       </div>
     </div>
   );
-}
-
-/** Format day for use as a unique key */
-function dayKey(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
